@@ -3,6 +3,6 @@ venv/
 env/
 log/
 data/cache/
-*.mp3
+data/cache.json
 .vscode/
 .idea/
