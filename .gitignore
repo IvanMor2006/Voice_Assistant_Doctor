@@ -1,48 +1,8 @@
-# Виртуальное окружение
+__pycache__/
 venv/
 env/
-.venv/
-ENV/
-
-# Файлы Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-
-# Логи
 log/
-*.log
-doctor.log
-
-# Кэш голосового помощника
 data/cache/
-data/cache.json
 *.mp3
-
-# Файлы с ключами и секретами
-*.key
-*.pem
-config_local.py
-.secrets
-
-# IDEs
 .vscode/
 .idea/
-*.swp
-*.swo
-
-# Системные файлы
-Thumbs.db
-.DS_Store
-desktop.ini
-
-# Файлы сборки
-dist/
-build/
-*.egg-info/
-
-# Временные файлы
-*.tmp
-*.temp
