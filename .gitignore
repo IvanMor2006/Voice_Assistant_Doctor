@@ -1,6 +1,7 @@
 log/
 data/cache/
 data/cache.json
+data/programs_cache.json
 
 .vscode/
 
