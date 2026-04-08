@@ -1,6 +1,6 @@
-import webbrowser, os
+import webbrowser, os, json
 from pynput.keyboard import Key
-from datetime import datetime
+from datetime import datetime, timedelta
 from rapidfuzz import fuzz
 from pathlib import Path
 
@@ -90,6 +90,8 @@ class Paths:
     BEEP_PATH = str(DATA_DIR / 'beep.mp3')
     SPEAK_PATH = str(DATA_DIR / 'speak.mp3')
     CACHE_PATH = DATA_DIR / 'cache.json'
+    PROGRAMS_CACHE_PATH = DATA_DIR / 'programs_cache.json'
+    __index = None
 
     LISTEN_ICON_PATH = str(DATA_DIR / 'listen.ico')
     NOT_LISTEN_ICON_PATH = str(DATA_DIR / 'not_listen.ico')
@@ -105,7 +107,8 @@ class Paths:
     BROWSER_PATH = r'C:/Users/ivan_/AppData/Local/Yandex/YandexBrowser/Application/browser.exe'
     webbrowser.register(BROWSER_NAME, None, webbrowser.BackgroundBrowser(BROWSER_PATH))
 
-    def __build_program_index(paths):
+    @classmethod
+    def __build_program_index(cls, paths):
         index = {}
         for path in paths:
             if not os.path.exists(path):
@@ -118,14 +121,50 @@ class Paths:
                         index[name] = os.path.join(root, file)
         return index
     
-    PROGRAMS = __build_program_index({
-        r'C:/Users/ivan_/AppData/Roaming/Microsoft/Windows/Start Menu/Programs',
-        r'C:/ProgramData/Microsoft/Windows/Start Menu/Programs',
-        r'C:\Users\ivan_\OneDrive\Desktop',
-        r'C:\Program Files',
-        r'C:\Program Files (x86)',
-        r'C:\Programms'
-    })  
+    @classmethod
+    def __load_programs_cache(cls):
+        if not cls.PROGRAMS_CACHE_PATH.exists():
+            return None
+        try:
+            with open(cls.PROGRAMS_CACHE_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            cache_time = datetime.fromisoformat(data['time'])
+            if datetime.now() - cache_time > timedelta(days=cls.CACHE_MAX_DAYS):
+                return None
+            return data['programs']
+        except:
+            return None
+    
+    @classmethod
+    def __save_programs_cache(cls, programs):
+        try:
+            with open(cls.PROGRAMS_CACHE_PATH, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'time': datetime.now().isoformat(),
+                    'programs': programs
+                }, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            log(f'Не удалось сохранить кэш установленных программ: {e}', 'WARNING')
+    
+    @classmethod
+    def PROGRAMS(cls):
+        if cls.__index is None:
+            cls.__index = cls.__load_programs_cache()
+            if cls.__index is None:
+                log('Кэширую список программ...')
+                cls.__index = cls.__build_program_index({
+                    r'C:/Users/ivan_/AppData/Roaming/Microsoft/Windows/Start Menu/Programs',
+                    r'C:/ProgramData/Microsoft/Windows/Start Menu/Programs',
+                    r'C:\Users\ivan_\OneDrive\Desktop',
+                    r'C:\Program Files',
+                    r'C:\Program Files (x86)',
+                    r'C:\Programms'
+                })
+                cls.__save_programs_cache(cls.__index)
+                log(f'Список программ закэширован: {len(cls.__index)} программ')
+            else:
+                log(f'Список программ загружен из кэша')
+        return cls.__index
 
 class Weather:
     URL = r'https://www.gismeteo.by/weather-gomel-4918/'
@@ -149,13 +188,16 @@ class Ollama:
     HOST = 'http://localhost:11434'
     TIMEOUT = 10
     HISTORY = {}
-    OPEN_PROMPT = f'''
+
+    @classmethod
+    def OPEN_PROMPT(cls):
+        return f'''
 У тебя несколько форматов ответа:
 1. OPEN WEBSITE ссылка на веб-сайт
 2. OPEN название_программы
 
 Список программ, которые установлены в системе:
-{Paths.PROGRAMS.keys()}
+{Paths.PROGRAMS().keys()}
 Если есть что-то похожее на программу из этого списка, то ответ должен быть формата 2.
 Если это не программа из списка, то найди соответствующий веб-сайт и отправь на него ссылку в формате ответа 1.
 Если я попросил расписание, то пиши OPEN WEBSITE file:///D:/Labs/Расписание.pdf
@@ -163,8 +205,8 @@ class Ollama:
 
 Запрос:
 '''
-    @property
-    def CLOSE_WINDOW_PROMPT():
+    @classmethod
+    def CLOSE_WINDOW_PROMPT(cls):
         return f'''
 Если есть что-то похожее на окно из этого списка (смотри поля 'title' и 'exe'), то ответ должен состоять только из hwnd нужного окна.
 

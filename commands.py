@@ -149,7 +149,7 @@ class Commands:
     def type(self, text: str):
         keyboard.write(text + ' ')
     def close_window(self, text: str):
-        if hwnd := self.ollama_query(Ollama.CLOSE_WINDOW_PROMPT + text):
+        if hwnd := self.ollama_query(Ollama.CLOSE_WINDOW_PROMPT() + text):
             try:
                 win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
                 self.doctor.speaker.speak('Закрываю окно')
@@ -159,7 +159,7 @@ class Commands:
     def close_process(self, text: str):
         pass
     def open(self, text: str):
-        if answer := self.ollama_query(Ollama.OPEN_PROMPT + text):
+        if answer := self.ollama_query(Ollama.OPEN_PROMPT() + text):
             try:
                 if (keyword := 'OPEN WEBSITE') in answer:
                     idx = answer.find(keyword) + len(keyword)
@@ -171,7 +171,7 @@ class Commands:
                     idx = answer.find(keyword) + len(keyword)
                     program_name = answer[idx:].strip()
                     self.doctor.speaker.speak('Запускаю')
-                    os.startfile(Paths.PROGRAMS[program_name])
+                    os.startfile(Paths.PROGRAMS()[program_name])
                     return
                 raise Exception('неправильный формат сообщения от Ollama')
             except Exception as e:
