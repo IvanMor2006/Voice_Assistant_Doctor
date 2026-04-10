@@ -1,6 +1,6 @@
-import speech_recognition as sr, pvporcupine, subprocess, threading, requests, pyaudio, struct, numpy as np, math, time
+import speech_recognition as sr, subprocess, threading, requests, pyaudio, queue, struct, numpy as np, math, time
 
-from config import log, VOLUME_MUTE_SCALE, VOLUME_MUTE_STATES, VOLUME_UNMUTE_STATES, Paths, Porcupine, Listen, Ollama
+from config import log, VOLUME_MUTE_SCALE, VOLUME_MUTE_STATES, VOLUME_UNMUTE_STATES, Paths, WakeWord, Listen, Ollama
 from process_command import Process_command
 from sound import Volume, Sound, Speaker
 from state import State
@@ -53,6 +53,8 @@ class Doctor:
         self.__thread = threading.Thread(target=self.__worker)
         self.__recognizer = sr.Recognizer()
         self.__recognizer.energy_threshold = Listen.SILENCE_THRESHOLD
+        self.__trancsribe_queue = queue.Queue()
+        self.__wake_word_thread = threading.Thread(target=self.__transcribe_worker)
 
         self.volume = Volume()
         self.sound = Sound(self)
@@ -64,9 +66,11 @@ class Doctor:
     def run(self):
         self.state = State.LISTENING_KEYWORD
         self.__thread.start()
+        self.__wake_word_thread.start()
         self.speaker.run()
         self.process_command.run()
         self.tray_icon.run()
+        self.__wake_word_thread.join()
         self.__thread.join()
         self.tray_icon.stop()
         self.process_command.stop()
@@ -99,58 +103,67 @@ class Doctor:
         with self.__state_lock:
             self.__state = value
 
+    def __transcribe_worker(self):
+        while self.state != State.NOT_RUNNING:
+            try:
+                command_buffer = self.__trancsribe_queue.get(timeout=2)
+                full_audio = b''.join(command_buffer)
+                text = self.__transcribe(full_audio, WakeWord.SAMPLE_RATE)
+                if self.state == State.LISTENING_KEYWORD:
+                    if text and WakeWord.KEYWORD in text:
+                        log('Обнаружено ключевое слово')
+                        self.sound.play_beep()
+                        self.state = State.LISTENING_COMMAND
+                        while not self.__trancsribe_queue.empty():
+                            try:
+                                self.__trancsribe_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                        self.__command_buffer.clear()
+                        self.start_command_time = time.time()
+                else:
+                    if text:
+                        self.process_command.command = text
+                        self.__command_buffer.clear()
+
+            except queue.Empty:
+                continue
+
     def __worker(self):
-        porcupine = pvporcupine.create(
-            access_key=Porcupine.ACCESS_KEY,
-            keyword_paths=[Paths.KEYWORD_PATH],
-            sensitivities=[Porcupine.SENSITIVITY]
-        )
         pa = pyaudio.PyAudio()
         audio_stream = pa.open(
-            rate=porcupine.sample_rate,
+            rate=WakeWord.SAMPLE_RATE,
             channels=1,
             format=pyaudio.paInt16,
             input=True,
-            frames_per_buffer=porcupine.frame_length
+            frames_per_buffer=WakeWord.FRAME_LENGTH
         )
-        command_buffer = []
+        self.__command_buffer = []
         rms_arr = []
-        last_voice_time = time.time()
-        speech_start_time = last_voice_time
-        speech_detected = False
+        self.start_command_time = None
+        self.last_speech_time = None
         while self.state != State.NOT_RUNNING:
             try:
-                pcm_bytes = audio_stream.read(porcupine.frame_length)
+                pcm_bytes = audio_stream.read(WakeWord.FRAME_LENGTH)
             except Exception as e:
                 log(f'Ошибка чтения аудио', 'ERROR')
                 break
             
-            pcm = struct.unpack_from('h' * porcupine.frame_length, pcm_bytes)
-
+            pcm = struct.unpack_from('h' * WakeWord.FRAME_LENGTH, pcm_bytes)
+            self.__command_buffer.append(pcm_bytes)
             rms = self.__compute_rms(pcm)
-
-            if rms < Listen.SILENCE_THRESHOLD * 2:
-                rms_arr.append(rms)
+            
             if len(rms_arr) > Listen.RMS_LENGTH_MAX:
                 Listen.SILENCE_THRESHOLD = max(50, np.mean(rms_arr) * 2)
                 log(f'Порог тишины {Listen.SILENCE_THRESHOLD}', 'DEBUG')
                 rms_arr = rms_arr[Listen.RMS_LENGTH_MAX // 2:]
-
+            if rms < Listen.SILENCE_THRESHOLD * 2:
+                rms_arr.append(rms)
+            # if rms > Listen.SILENCE_THRESHOLD:
+            #     log(f'RMS: {rms}', 'DEBUG')
             if self.state == State.LISTENING_KEYWORD:
-                if porcupine.process(pcm) >= 0:
-                    log('Обнаружено ключевое слово')
-                    
-                    self.sound.play_beep()
-
-                    self.state = State.LISTENING_COMMAND
-                    last_voice_time = time.time()
-                    speech_start_time = last_voice_time
-                    speech_detected = False
-
-                    for _ in range(10):
-                        audio_stream.read(porcupine.frame_length)
-                    command_buffer.clear()
-
+                if len(self.__command_buffer) % 20 == 0:
+                    self.__trancsribe_queue.put(self.__command_buffer[-40:])
             elif self.state == State.PROCESSING_COMMAND:
                 time.sleep(0.01)
                 continue
@@ -158,36 +171,24 @@ class Doctor:
                 if self.sound.play_count > 0:
                     time.sleep(0.01)
                     continue
-
                 if rms > Listen.SILENCE_THRESHOLD:
-                    log(f'RMS: {rms}', 'DEBUG')
-                    
-                command_buffer.append(pcm_bytes)
-                if rms > Listen.SILENCE_THRESHOLD:
-                    speech_detected = True
-                    last_voice_time = time.time()
-                else:
-                    if not speech_detected:
-                        if time.time() - last_voice_time >= Listen.INIT_TIMEOUT:
-                            log('Таймаут ожидания речи, возврат к ключевому слову')
-                            command_buffer.clear()
-                            self.state = State.LISTENING_KEYWORD
-                    elif time.time() - last_voice_time >= Listen.END_TIMEOUT or (max_timeout := (time.time() - speech_start_time >= Listen.MAX_TIMEOUT)):
-                        if max_timeout:
-                            log('Таймаут макмимальной длины речи')
-                        log(f'Команда записана, длина: {len(command_buffer)} блоков', 'DEBUG')
-                        full_audio = b''.join(command_buffer)
-                        text = self.__transcribe(full_audio, porcupine.sample_rate)
-                        if text:
-                            self.process_command.command = text
-                        command_buffer.clear()
-                        last_voice_time = time.time()
-                        speech_start_time = last_voice_time
-                        speech_detected = False
+                    self.last_speech_time = time.time()
+                if not self.last_speech_time:
+                    if self.start_command_time and time.time() - self.start_command_time > Listen.INIT_TIMEOUT:
+                        log('Таймаут ожидания речи, возврат к ключевому слову')
+                        self.__command_buffer.clear()
+                        self.state = State.LISTENING_KEYWORD
+                        continue
+                elif time.time() - self.last_speech_time > Listen.END_TIMEOUT or (max_timeout := (self.start_command_time and time.time() - self.start_command_time > Listen.MAX_TIMEOUT)):
+                    if max_timeout:
+                        log('Таймаут макмимальной длины речи')
+                    log(f'Команда записана, длина: {len(self.__command_buffer)} блоков', 'DEBUG')
+                    self.__trancsribe_queue.put(self.__command_buffer)
+                    self.last_speech_time = None
+                    self.start_command_time = None
         audio_stream.stop_stream()
         audio_stream.close()
         pa.terminate()
-        porcupine.delete()
 
     def __compute_rms(self, pcm):
         if not pcm:
@@ -206,7 +207,8 @@ class Doctor:
             log(f'Распознано: {text}')
             return text.lower()
         except sr.UnknownValueError:
-            log('Речь не распознана', 'WARNING')
+            pass
+            # log('Речь не распознана', 'WARNING')
         except sr.RequestError as e:
             log(f'Ошибка сервиса распознавания: {e}', 'ERROR')
         except Exception as e:

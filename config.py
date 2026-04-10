@@ -172,9 +172,10 @@ class Weather:
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
 
-class Porcupine:
-    ACCESS_KEY = '9YSFHzsZMxbnpCYP/s7HD+Oxhhk/3u9vgOR7Ik54N0BIqBamkTfPrA=='
-    SENSITIVITY = 0.55
+class WakeWord:
+    SAMPLE_RATE = 16000
+    FRAME_LENGTH = 512
+    KEYWORD = 'доктор'
 
 class Listen:
     SILENCE_THRESHOLD = 300
