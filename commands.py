@@ -25,7 +25,7 @@ class Commands:
             'какая яркость': lambda: self.doctor.speaker.speak(f'Яркость. {get_brightness()}%'),
             'ярче' : lambda: set_brightness('+25'),
             'темнее' : lambda: set_brightness('-25'),
-            'какая яркость': lambda: self.doctor.speaker.speak(f'Громкость. {self.doctor.volume.level * 100}%'),
+            'какая громкость': lambda: self.doctor.speaker.speak(f'Громкость. {int(self.doctor.volume.level * 100)}%'),
             'громче' : lambda: self.__set_volume_level(self.doctor.volume.level + 0.20),
             'тише' : lambda: self.__set_volume_level(self.doctor.volume.level - 0.20),
             'сколько времени' : lambda: self.doctor.speaker.speak(datetime.now().strftime('%H:%M')),
