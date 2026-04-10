@@ -4,7 +4,7 @@
 
 ## Возможности
 
-- Пробуждение по ключевому слову (Porcupine)
+- Пробуждение по ключевому слову (`Доктор`)
 - Распознавание речи (Google Speech API)
 - Интеграция с локальной LLM (Ollama)
 - Озвучивание ответов (Edge TTS) с кэшированием
@@ -20,7 +20,7 @@
 - Python 3.10+
 - asyncio, threading, queue
 - speech_recognition, edge-tts
-- pvporcupine, pyaudio
+- pyaudio
 - ollama, requests
 - pycaw, pynput, pyautogui, win32gui
 - pystray, PIL
